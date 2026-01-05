@@ -1,41 +1,55 @@
-let userList = document.getElementById("usersList");
 let socket;
 let username = "User" + Math.floor(Math.random() * 1000);
-let isConnected = false;
+
 let messageDiv = document.getElementById("messages");
 let input = document.getElementById("messageInput");
-let typing = false;
-let typingTimeout = null;
 let typingDiv = document.getElementById("typing");
 let userDiv = document.getElementById("online");
+let userList = document.getElementById("usersList");
+
+let myVideo = document.getElementById("myVideo");
+let remoteVideo = document.getElementById("remoteVideo");
+
 let localStream;
 let peer;
-let remoteVideo = document.getElementById("remoteVideo");
-let myVideo = document.getElementById("myVideo");
+let remoteUser = null;
 
-document.addEventListener("DOMContentLoaded", (e) => {
-  getCameraStream();
-});
 
-function updateUserList(arr) {
-  userList.innerHTML = "";
-  arr.forEach((U) => {
-    let opt = document.createElement("option");
-    opt.value = U;
-    opt.innerText = U;
-    userList.appendChild(opt);
-  });
-}
-
-async function getCameraStream() {
+// -------- CAMERA --------
+document.addEventListener("DOMContentLoaded", async () => {
   localStream = await navigator.mediaDevices.getUserMedia({
     video: true,
-    audio: true,
+    audio: true
   });
-  myVideo.srcObject = localStream;
-}
 
-input.addEventListener("keyup", (e) => {
+  myVideo.srcObject = localStream;
+});
+
+
+// -------- CONNECT SOCKET --------
+socket = new WebSocket(
+  location.origin.replace("http", "ws")
+);
+
+socket.onopen = () => {
+
+  addMessage("🟢 Connected");
+
+  socket.send(JSON.stringify({
+    type: "join",
+    user: username
+  }));
+};
+
+socket.onmessage = (event) => handleMessage(event);
+
+socket.onclose = () => {
+  addMessage("🔴 Disconnected");
+};
+
+
+// -------- CHAT UI --------
+input.addEventListener("keyup", e => {
   if (e.key === "Enter") sendMessage();
 });
 
@@ -43,171 +57,163 @@ function addMessage(msg) {
   let p = document.createElement("p");
   p.innerText = msg;
   messageDiv.appendChild(p);
+  messageDiv.scrollTop = messageDiv.scrollHeight;
 }
 
-function connect() {
-  socket = new WebSocket("https://webrtc-sockets-huf8degqe5drfrbc.eastasia-01.azurewebsites.net");
 
-  socket.onopen = () => {
-    isConnected = true;
-    addMessage("🟢 Connected to Server");
-
-    socket.send(
-      JSON.stringify({
-        type: "join",
-        user: username,
-      })
-    );
-  };
-
-  socket.onmessage = (event) => handleMessage(event);
-
-  socket.onclose = () => {
-    isConnected = false;
-    addMessage("🔴 Disconnected - retrying in 2 seconds...");
-    setTimeout(connect, 2000);
-  };
-
-  socket.onerror = (error) => {
-    addMessage("⚠️ Connection error");
-  };
+// -------- UPDATE USER LIST --------
+function updateUserList(arr) {
+  userList.innerHTML = "";
+  arr.forEach(u => {
+    if (u === username) return; // don't show yourself
+    let opt = document.createElement("option");
+    opt.value = opt.innerText = u;
+    userList.appendChild(opt);
+  });
 }
 
-connect();
 
+// -------- HANDLE SIGNAL MESSAGES --------
 async function handleMessage(event) {
-  let msg = JSON.parse(event.data);
+
+  const msg = JSON.parse(event.data);
+
+
   if (msg.online) {
     updateUserList(msg.online);
     userDiv.innerText = msg.online.join(", ");
   }
 
-  if (msg.type === "ice" && peer) {
-    try {
-      await peer.addIceCandidate(msg.candidate);
-    } catch (err) {
-      console.error("Error adding received ice candidate", err);
-    }
-  }
-
-  if (msg.type === "answer") {
-    await peer.setRemoteDescription(new RTCSessionDescription(msg.answer));
-  }
-
-  if (msg.type === "offer" && msg.to === username) {
-    let accept = confirm(`${msg.from} is calling you. Accept?`);
-    if (!accept) {
-      return;
-    }
-    await handleOffer(msg.offer);
+  if (msg.type === "chat") {
+    addMessage(`${msg.user}: ${msg.text}`);
   }
 
   if (msg.type === "join") {
-    addMessage(`🔵 ${msg.user} joined the chat`);
-  } else if (msg.type === "chat") {
-    addMessage(`${msg.user}: ${msg.text}`);
-  } else if (msg.type === "leave") {
-    addMessage(`🔴 ${msg.user} left the chat`);
-  } else if (msg.type === "typing") {
-    typingDiv.innerText = msg.user + "is typing...";
-  } else if (msg.type === "stopTyping") {
-    typingDiv.innerText = "";
+    addMessage(`🔵 ${msg.user} joined`);
+  }
+
+  if (msg.type === "leave") {
+    addMessage(`🔴 ${msg.user} left`);
+  }
+
+
+  // --- OFFER RECEIVED ---
+  if (msg.type === "offer" && msg.to === username) {
+
+    remoteUser = msg.from;
+
+    let accept = confirm(`${msg.from} is calling you. Accept?`);
+
+    if (!accept) return;
+
+    await handleOffer(msg.offer);
+  }
+
+
+  // --- ANSWER RECEIVED ---
+  if (msg.type === "answer" && msg.to === username) {
+
+    await peer.setRemoteDescription(
+      new RTCSessionDescription(msg.answer)
+    );
+  }
+
+
+  // --- ICE CANDIDATE RECEIVED ---
+  if (msg.type === "ice" && msg.to === username && peer) {
+
+    await peer.addIceCandidate(msg.candidate);
   }
 }
 
-function sendMessage() {
-  if (!isConnected) {
-    alert("Not Connected to server");
-    return;
-  }
 
-  let message = {
+
+// -------- SEND CHAT --------
+function sendMessage() {
+
+  socket.send(JSON.stringify({
     type: "chat",
     user: username,
-    text: input.value,
-  };
-  socket.send(JSON.stringify(message));
+    text: input.value
+  }));
+
   input.value = "";
 }
 
-// WebRTC Call Functions
+
+
+// -------- PEER CONNECTION --------
 function createConnection() {
+
   peer = new RTCPeerConnection({
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }, // free STUN server
-    ],
+      { urls: "stun:stun.l.google.com:19302" }
+    ]
   });
 
-  // Send ICE candidates to remote peer
-  peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.send(
-        JSON.stringify({
-          type: "ice",
-          candidate: event.candidate,
-        })
-      );
+  // ICE Routing
+  peer.onicecandidate = e => {
+    if (e.candidate) {
+      socket.send(JSON.stringify({
+        type: "ice",
+        candidate: e.candidate,
+        from: username,
+        to: remoteUser
+      }));
     }
   };
 
-  // When remote stream arrives
-  peer.ontrack = (event) => {
-    remoteVideo.srcObject = event.streams[0];
+  // Remote stream received
+  peer.ontrack = e => {
+    remoteVideo.srcObject = e.streams[0];
   };
 
-  // Add local stream tracks to peer connection
-  localStream.getTracks().forEach((track) => {
-    peer.addTrack(track, localStream);
-  });
+  // Send local media
+  localStream.getTracks().forEach(track =>
+    peer.addTrack(track, localStream)
+  );
 }
 
-async function startCall() {
-  let target = userList.value;
 
-  if (!target) {
-    alert("Select a user to call ");
-    return;
-  }
+
+// -------- START CALL --------
+async function startCall() {
+
+  remoteUser = userList.value;
+
+  if (!remoteUser) return alert("Select a user to call");
 
   createConnection();
-  //create offer
+
   let offer = await peer.createOffer();
   await peer.setLocalDescription(offer);
 
-  //send offer view websocket
-  socket.send(
-    JSON.stringify({
-      type: "offer",
-      offer: offer,
-      from: username,
-      to: target,
-    })
-  );
+  socket.send(JSON.stringify({
+    type: "offer",
+    offer,
+    from: username,
+    to: remoteUser
+  }));
 }
 
+
+
+// -------- HANDLE OFFER --------
 async function handleOffer(offer) {
-  //Ensure camera is running
-  if (!localStream) {
-    await getCameraStream();
-  }
 
-  // Create peer connection
   createConnection();
-  // Set caller's sdp
-  await peer.setRemoteDescription(new RTCSessionDescription(offer));
 
-  //create answer sdp
+  await peer.setRemoteDescription(
+    new RTCSessionDescription(offer)
+  );
+
   let answer = await peer.createAnswer();
-
   await peer.setLocalDescription(answer);
 
-  //Send back to the Server
-  socket.send(
-    JSON.stringify({
-      type: "answer",
-      answer: answer,
-      from: username,
-      to: caller,
-    })
-  );
+  socket.send(JSON.stringify({
+    type: "answer",
+    answer,
+    from: username,
+    to: remoteUser
+  }));
 }
