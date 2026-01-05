@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket</title>
+
+</head>
+<style>
+  body {font-family: Arial;}
+  #messages {
+    border: 1px solid gray;
+    height: 300px;
+    padding:10px;
+    overflow-y: auto;
+    margin-bottom:10px;
+  }
+</style>
+<body>
+  
+  <h2>WebSocket Chat</h2>
+  <div id="messages"> </div>
+  <h4>Online Users : </h4>
+  <div id="online"> </div>
+  <p id="typing"></p>
+ 
+  <input type="text" id="messageInput" placeholder="Type message..."/>
+  <button onclick="sendMessage()">Send</button>
+  <select id="usersList"> </select>
+    <button onClick="startCall()">Start Call</button>
+  
+   
+<h3>My Video</h3>
+  <video id="myVideo" autoplay playsinline> </video>
+
+<h3>Remote Video</h3>
+
+<video id="remoteVideo" autoplay playsinline></video>
+  <script src="script.js"></script>
+</body>
+</html>
