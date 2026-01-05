@@ -46,7 +46,7 @@ function addMessage(msg) {
 }
 
 function connect() {
-  socket = new WebSocket("ws://localhost:3000");
+  socket = new WebSocket("https://webrtc-sockets-huf8degqe5drfrbc.eastasia-01.azurewebsites.net");
 
   socket.onopen = () => {
     isConnected = true;

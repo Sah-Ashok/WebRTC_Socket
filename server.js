@@ -1,27 +1,46 @@
-const WebSocket = require('ws');
-const server = new WebSocket.Server({ port: 3000 });
+const express = require("express");
+const http = require("http");
+const WebSocket = require("ws");
+const path = require("path");
+const cors = require("cors");
+const app = express();
 
-const users = new Map();     // socket -> username
-const sockets = new Map();   // username -> socket
+app.use(cors());
+// ----- STATIC PUBLIC FOLDER -----
+app.use(express.static(path.join(__dirname, "public")));
 
-console.log("WebSocket server started on ws://localhost:3000");
+// OPTIONAL: default route (serves index.html)
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
+});
 
-server.on('connection', (socket) => {
+// ----- CREATE HTTP SERVER -----
+const port = process.env.PORT || 3000;
+const server = http.createServer(app);
 
-  socket.on('message', (data) => {
+// ----- ATTACH WEBSOCKET SERVER -----
+const wss = new WebSocket.Server({ server });
 
+// ----- USER MAPS -----
+const users = new Map(); // socket -> username
+const sockets = new Map(); // username -> socket
+
+console.log("Starting WebSocket + Express server...");
+
+// ----- WEBSOCKET HANDLERS -----
+wss.on("connection", (socket) => {
+  socket.on("message", (data) => {
     const msg = JSON.parse(data.toString());
 
     // JOIN
     if (msg.type === "join") {
-
       users.set(socket, msg.user);
       sockets.set(msg.user, socket);
 
       broadcast({
         type: "join",
         user: msg.user,
-        online: Array.from(sockets.keys())
+        online: Array.from(sockets.keys()),
       });
     }
 
@@ -35,7 +54,7 @@ server.on('connection', (socket) => {
       broadcast(msg);
     }
 
-    // OFFER -> send ONLY to target
+    // OFFER — send only to target
     else if (msg.type === "offer") {
       sendToUser(msg.to, msg);
     }
@@ -45,16 +64,14 @@ server.on('connection', (socket) => {
       sendToUser(msg.to, msg);
     }
 
-    // ICE CANDIDATE
+    // ICE
     else if (msg.type === "ice") {
       sendToUser(msg.to, msg);
     }
-
   });
 
-
-  socket.on('close', () => {
-
+  // USER DISCONNECT
+  socket.on("close", () => {
     const username = users.get(socket);
 
     users.delete(socket);
@@ -64,33 +81,33 @@ server.on('connection', (socket) => {
       broadcast({
         type: "leave",
         user: username,
-        online: Array.from(sockets.keys())
+        online: Array.from(sockets.keys()),
       });
     }
   });
-
 });
 
-
-// --- Helper Functions ---
-
+// ----- BROADCAST TO ALL USERS -----
 function broadcast(obj) {
-
   const msg = JSON.stringify(obj);
 
-  server.clients.forEach((client) => {
+  wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(msg);
     }
   });
-
 }
 
+// ----- SEND TO SPECIFIC USER -----
 function sendToUser(username, message) {
+  const sock = sockets.get(username);
 
-  const userSocket = sockets.get(username);
-
-  if (userSocket) {
-    userSocket.send(JSON.stringify(message));
+  if (sock?.readyState === WebSocket.OPEN) {
+    sock.send(JSON.stringify(message));
   }
 }
+
+// ----- START SERVER -----
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
